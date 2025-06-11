@@ -54,7 +54,7 @@ print(response.text)
 ### Available Models
 
 #### Gemini 2.5 Pro Preview
-- **Model ID**: `gemini-2.5-pro-preview-05-06`
+- **Model ID**: `gemini-2.5-pro-preview-06-05`
 - **Context Window**: 1,048,576 tokens input, 65,536 tokens output
 - **Best For**: Complex reasoning, coding, STEM problems, large dataset analysis
 - **Features**: Thinking mode, structured output, caching, function calling, code execution, search grounding
@@ -76,25 +76,25 @@ print(response.text)
 - Output: $0.60 (non-thinking), $3.50 (thinking)
 - Context Caching: $0.0375-$0.25 + $1.00/hour storage
 
-#### Other Models
-- **Gemini 2.0 Flash**: Next-gen features, realtime streaming
-- **Gemini 2.0 Flash-Lite**: Cost efficiency, low latency
-- **Gemini 1.5 Pro/Flash**: Legacy models with proven performance
+#### Other Key Models
+- **Gemini 2.0 Flash**: Next-gen features, speed, thinking, and realtime streaming (should never be used in practice, use 2.5 models instead except where they don't support needed functionality).
+- **Gemini 2.0 Flash-Lite**: Optimized for cost efficiency and low latency (should never be used in practice, use 2.5 models instead except where they don't support needed functionality).
+- **Gemini 1.5 Pro**: Legacy model (Obsolete-- DO NOT USE).
+- **Gemini 1.5 Flash**: Legacy model (Obsolete-- DO NOT USE).
 
 ### Model Variants
 
-```python
-# Specialized variants
-models = {
-    "text-generation": "gemini-2.5-flash-preview-05-20",
-    "native-audio": "gemini-2.5-flash-preview-native-audio-dialog",
-    "text-to-speech": "gemini-2.5-flash-preview-tts",
-    "image-generation": "gemini-2.0-flash-preview-image-generation",
-    "video-generation": "veo-2.0-generate-001",
-    "embeddings": "gemini-embedding-exp-03-07",
-    "live-api": "gemini-2.0-flash-live-001"
-}
-```
+| Model Category         | Model ID / Variant                            | Optimized For                                                        |
+| ---------------------- | --------------------------------------------- | -------------------------------------------------------------------- |
+| **High-End Reasoning** | `gemini-2.5-pro-preview-06-05`                  | Complex reasoning, coding, STEM, long context analysis.              |
+| **Speed & Efficiency** | `gemini-2.5-flash-preview-05-20`                | Fast, cost-effective responses with adaptive thinking.               |
+| **Native Audio**       | `gemini-2.5-flash-preview-native-audio-dialog`  | High-quality, conversational, interleaved text-and-audio I/O.        |
+| **Text-to-Speech**     | `gemini-2.5-flash-preview-tts`                  | Low-latency, controllable text-to-speech generation.                 |
+| **Image Generation**   | `gemini-2.0-flash-preview-image-generation`     | Conversational image generation and editing.                         |
+| **Live Interaction**   | `gemini-2.0-flash-live-001`                     | Low-latency bidirectional voice and video interactions.              |
+| **Embeddings**         | `gemini-embedding-exp-03-07`                    | Generating state-of-the-art text embeddings.                         |
+| **Video Generation**   | `veo-2.0-generate-001`                          | High-quality video generation from text and image prompts.           |
+| **Legacy/Other**       | `gemini-1.5-pro`, `gemini-1.5-flash`          | Legacy/obsolete models.
 
 ## Getting Started
 
@@ -282,6 +282,16 @@ for chunk in client.models.generate_content_stream(
                 print("Answer:", part.text)
 ```
 
+#### When to Use or Adjust Thinking
+
+- **Hard Tasks**: For complex challenges (e.g., solving advanced math problems, generating complex code), let the model use its full thinking capability.
+- **Medium Tasks**: For standard requests that benefit from some planning (e.g., comparing concepts, creating outlines), the default thinking behavior is usually sufficient.
+- **Easy Tasks**: For simple fact retrieval or classification, thinking can be disabled to reduce latency and cost. To disable, set the `thinking_budget` to `0` in the `ThinkingConfig` (Flash models only).
+
+#### Thinking with Tools
+
+Thinking seamlessly integrates with other tools like Function Calling, Code Execution, and Search Grounding. The model can reason about which tool to use, execute it, and then incorporate the results into its ongoing thought process to arrive at a final answer.
+
 ### Function Calling
 
 Function calling allows models to interact with external tools and APIs.
@@ -330,20 +340,23 @@ if response.candidates[0].content.parts[0].function_call:
     # Step 5: Execute function (your code)
     weather_result = {"temperature": 22, "condition": "sunny"}
     
-    # Step 6: Send result back
+    # Step 6: Send the function's result back to the model, along with the 
+    # original prompt and the model's function call request. This gives the
+    # model the full conversational context to generate a final, natural language response.
     function_response = types.Part.from_function_response(
         name=function_call.name,
         response={"result": weather_result}
     )
     
     final_response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash-preview-05-20", # Using a more current model
         contents=[
-            types.Content(role="user", parts=[types.Part(text="What's the weather in Tokyo?")]),
-            types.Content(role="model", parts=[types.Part(function_call=function_call)]),
-            types.Content(role="user", parts=[function_response])
-        ],
-        config=config
+            types.Content(role="user", parts=[types.Part(text="What's the weather in Tokyo?")]), # Original prompt
+            types.Content(role="model", parts=[types.Part(function_call=function_call)]),     # Model's function call
+            types.Content(role="user", parts=[function_response])                             # Your function's result
+        ]
+        # Note: Do not include `tools` config in this final call unless you
+        # want the model to be able to call another function.
     )
     print(final_response.text)
 ```
@@ -441,6 +454,34 @@ config = types.GenerateContentConfig(
 )
 ```
 
+#### Model Context Protocol (MCP) (Experimental)
+
+MCP is an open standard for connecting AI applications with external tools. The Gemini SDKs have experimental built-in support for MCP, which can simplify tool integration.
+
+- **How it works**: You can connect to an MCP server (e.g., a local weather tool server), and the Gemini SDK can automatically handle the tool-use handshake.
+- **Automatic Calling**: By passing an MCP `ClientSession` object into the `tools` configuration, the Python SDK can automatically detect a tool call, execute it against the MCP server, and return the result to the model.
+
+```python
+# Conceptual example of using an MCP server
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+# ... setup for MCP server connection ...
+async with stdio_client(server_params) as (read, write):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        response = await client.aio.models.generate_content(
+            model="gemini-2.0-flash",
+            contents="What is the weather in London?",
+            config=genai.types.GenerateContentConfig(
+                tools=[session]  # Pass the MCP session as a tool
+            )
+        )
+        print(response.text)
+```
+
+**Important Note**: The documentation specifies that **Compositional Function Calling** (chaining multiple dependent function calls) and **Multi-tool use** (e.g., combining Search and Code Execution in one prompt) are **Live API only features** at the moment.
+
 ### Structured Output
 
 Generate JSON or enum outputs with guaranteed schema compliance.
@@ -458,7 +499,7 @@ class Recipe(BaseModel):
     difficulty: str
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents="Give me a recipe for chocolate chip cookies",
     config={
         "response_mime_type": "application/json",
@@ -472,6 +513,9 @@ print(response.text)
 # Access as parsed objects
 recipe = response.parsed
 print(recipe.recipe_name)
+
+# Note: Pydantic validators are not yet supported. If a pydantic.ValidationError 
+# occurs, it is suppressed, and .parsed may be empty or None.
 ```
 
 #### Complex Schema Example
@@ -490,7 +534,7 @@ class Person(BaseModel):
     hobbies: list[str]
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents="Generate a fictional person's profile",
     config={
         "response_mime_type": "application/json",
@@ -513,7 +557,7 @@ class Sentiment(enum.Enum):
     NEUTRAL = "neutral"
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents="Analyze sentiment: 'This product exceeded my expectations!'",
     config={
         "response_mime_type": "text/x.enum",
@@ -522,6 +566,12 @@ response = client.models.generate_content(
 )
 print(response.text)  # "positive"
 ```
+
+#### Property Ordering and Advanced Schemas
+
+**Property Ordering**: To ensure consistent output, especially when providing few-shot examples, use the optional `propertyOrdering` field in your schema. This is not a standard OpenAPI field but is supported by the Gemini API.
+
+**JSON Schema**: For Gemini 2.5 models, you can use the more recent JSON Schema specification via the `response_json_schema` field instead of `response_schema`. This allows for more complex validations but is not yet supported in the Python SDK via Pydantic model conversion (must be passed as a dictionary).
 
 #### Lists and Complex Structures
 
@@ -535,7 +585,7 @@ class TaskItem(BaseModel):
     completed: bool = False
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents="Create a todo list for planning a birthday party",
     config={
         "response_mime_type": "application/json",
@@ -547,6 +597,14 @@ tasks = response.parsed
 for task in tasks:
     print(f"- [{task.priority}] {task.task}")
 ```
+
+#### Best Practices and Error Handling
+
+If you receive an `InvalidArgument: 400` error with a complex schema, it may be due to the schema's complexity. To resolve this:
+- Shorten property and enum names.
+- Reduce the number of nested objects or arrays.
+- Limit properties with complex constraints (e.g., min/max values, date-time formats).
+- Use `propertyOrdering` to ensure consistent structure, especially when providing few-shot examples.
 
 ### Long Context
 
@@ -577,6 +635,12 @@ print(f"Input limit: {model_info.input_token_limit:,} tokens")
 print(f"Output limit: {model_info.output_token_limit:,} tokens")
 ```
 
+#### Best Practices and Limitations
+
+- **Query Placement**: For long contexts, place your specific question or instruction at the **end of the prompt** for better performance.
+- **Token Efficiency**: While the model can handle a large context, it's still best practice to only include necessary tokens to avoid potential performance degradation and higher costs.
+- **"Needle in a Haystack" Limitation**: The models perform exceptionally well at finding a single piece of information ("a needle") in a large context. However, performance can decrease when trying to retrieve **multiple, distinct pieces of information** in a single query. For high-accuracy retrieval of many items, it may be more effective to send multiple, targeted requests.
+
 ### Grounding with Google Search
 
 Enhance responses with real-time web information.
@@ -605,26 +669,6 @@ if response.candidates[0].grounding_metadata:
     metadata = response.candidates[0].grounding_metadata
     print("Search queries:", metadata.web_search_queries)
     print("Sources:", metadata.grounding_chunks)
-```
-
-#### Dynamic Retrieval (Gemini 1.5 only)
-
-```python
-# Control when to use search
-response = client.models.generate_content(
-    model="gemini-1.5-flash",
-    contents="Who won the latest Nobel Prize in Physics?",
-    config=types.GenerateContentConfig(
-        tools=[types.Tool(
-            google_search_retrieval=types.GoogleSearchRetrieval(
-                dynamic_retrieval_config=types.DynamicRetrievalConfig(
-                    mode=types.DynamicRetrievalConfigMode.MODE_DYNAMIC,
-                    dynamic_threshold=0.7  # 0-1, higher = more selective
-                )
-            )
-        )]
-    )
-)
 ```
 
 ### URL Context Tool
@@ -666,7 +710,7 @@ Execute Python code within the model's environment.
 ```python
 # Enable code execution
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents="Calculate the factorial of 20",
     config=types.GenerateContentConfig(
         tools=[types.Tool(code_execution=types.ToolCodeExecution)]
@@ -690,7 +734,7 @@ for part in response.candidates[0].content.parts:
 csv_file = client.files.upload(file="data.csv")
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=[
         csv_file,
         "Analyze this data and create a visualization"
@@ -712,11 +756,12 @@ The code execution environment includes:
 - TensorFlow, OpenCV
 - And many more standard data science libraries
 
-**Limitations**:
-- 30-second execution timeout
-- No custom library installation
-- No network access
-- matplotlib only for graphics
+#### Limitations and Environment
+- **Timeout**: Code execution has a 30-second runtime limit.
+- **No Custom Libraries**: You cannot install your own Python libraries. You must use the provided environment.
+- **No Network Access**: The execution environment does not have access to the internet.
+- **Graphing**: Matplotlib is the only supported library for rendering graphs, which are returned as inline images.
+- **File I/O**: Best used with text and CSV files. Maximum input file size is limited by the model's context window.
 
 ## Working with Media
 
@@ -785,7 +830,7 @@ image_part = types.Part.from_bytes(
 )
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=["Describe this image", image_part]
 )
 ```
@@ -853,7 +898,7 @@ image1 = client.files.upload(file="before.jpg")
 image2 = client.files.upload(file="after.jpg")
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=[
         "What changed between these images?",
         image1,
@@ -864,7 +909,9 @@ response = client.models.generate_content(
 
 ### Document Processing
 
-Process PDFs and documents with native understanding.
+Gemini can process various document types with native understanding, not just PDFs. This includes source code, markup, and plain text files.
+- **Supported types include**: `PDF`, `Python`, `JavaScript`, `HTML`, `CSS`, `Markdown`, `CSV`, `XML`, `RTF`, `TXT`.
+- **Functionality**: Extract text, analyze diagrams/charts/tables, answer questions about content, and even transcribe layouts.
 
 #### PDF Processing
 
@@ -873,7 +920,7 @@ Process PDFs and documents with native understanding.
 pdf_file = client.files.upload(file="document.pdf")
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=[pdf_file, "Summarize this document"]
 )
 
@@ -883,7 +930,7 @@ pdf_url = "https://example.com/paper.pdf"
 pdf_data = httpx.get(pdf_url).content
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=[
         types.Part.from_bytes(
             data=pdf_data,
@@ -902,7 +949,7 @@ pdf1 = client.files.upload(file="report_2023.pdf")
 pdf2 = client.files.upload(file="report_2024.pdf")
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=[
         pdf1, 
         pdf2, 
@@ -934,7 +981,7 @@ while video_file.state.name == 'PROCESSING':
     video_file = client.files.get(name=video_file.name)
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=[
         video_file,
         "Describe what happens in this video"
@@ -949,7 +996,7 @@ response = client.models.generate_content(
 audio_file = client.files.upload(file="podcast.mp3")
 
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=[
         audio_file,
         "Transcribe and summarize the key points"
@@ -964,6 +1011,8 @@ response = client.models.generate_content(
 ## Embeddings
 
 Generate semantic embeddings for text similarity and search.
+
+**Note on Models**: The newest Gemini-native embedding model is `gemini-embedding-exp-03-07`. The `text-embedding-004` model is also available and supports features like `output_dimensionality` for truncating embeddings. Choose based on your specific needs for performance and features.
 
 ### Basic Embeddings
 
@@ -1074,7 +1123,8 @@ For guaranteed cost savings with large, reused contexts:
 # Create cache
 video_file = client.files.upload(file="tutorial_video.mp4")
 cache = client.caches.create(
-    model="gemini-2.5-flash-001",  # Must use explicit version
+    # Note: You MUST use an explicit, versioned model name for caching.
+    model="models/gemini-2.0-flash-001", 
     config=types.CreateCachedContentConfig(
         display_name="Tutorial Video Cache",
         system_instruction="You are a video content analyzer",
@@ -1083,9 +1133,9 @@ cache = client.caches.create(
     )
 )
 
-# Use cache
+# Use cache with the same model
 response = client.models.generate_content(
-    model="gemini-2.5-flash-001",
+    model="models/gemini-2.0-flash-001",
     contents="What programming concepts are explained?",
     config=types.GenerateContentConfig(
         cached_content=cache.name
@@ -1160,6 +1210,25 @@ print(f"Total tokens: {token_count.total_tokens}")
 - Video: 263 tokens/second
 - Audio: 32 tokens/second  
 - PDF: 258 tokens/page
+
+### Advanced Token and Cost Management
+
+Understanding how tokens are counted for advanced features is crucial for managing costs.
+
+#### Thinking Token Costs
+
+- **Pricing Model**: When thinking is enabled, the final response cost is the sum of **output tokens + thinking tokens**.
+- **Full vs. Summarized Thoughts**: The API may only return a *summary* of the model's thoughts. However, you are billed for the **total number of tokens the model generated internally** to produce that summary, not just the summary tokens you receive. This means the `thoughts_token_count` can be much larger than the text you see in the thought summary.
+
+#### Code Execution Costs
+
+Code execution involves a multi-step process, and the token billing reflects this:
+
+1. **Initial Input**: Your prompt is billed as **input tokens**.
+2. **Intermediate Steps**: The model's generated code and the output from the code's execution are fed back to the model as context. These are considered **intermediate tokens** and are also billed as **input tokens** for the final step.
+3. **Final Output**: The final summary response you receive is billed as **output tokens**.
+
+The `usage_metadata` in the API response helps you track these different token counts.
 
 ## Prompt Engineering
 
@@ -1283,13 +1352,22 @@ Format your response as:
 """
 ```
 
+### Fallback Responses & Model Behavior
+
+- **Handling Fallbacks**: If the model returns a generic fallback response like *"I'm not able to help with that..."*, it may have triggered a safety filter. Try adjusting your prompt or, for more creative tasks, slightly increasing the `temperature` setting.
+- **Determinism vs. Randomness**: A model's response is generated in two stages:
+    1. **Probability Calculation**: The model processes the prompt and deterministically calculates the probabilities of all possible next tokens.
+    2. **Decoding**: The model selects the next token from that probability distribution. This stage can be random.
+    - A `temperature` of `0` makes this stage deterministic (always picking the most likely token).
+    - A higher `temperature` increases randomness, allowing for more creative but less predictable responses.
+
 ### Multimodal Prompting
 
 #### Image + Text
 ```python
 # Place image before text for single images
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=[
         image_file,  # Image first
         "Create a recipe based on the ingredients shown"
@@ -1298,7 +1376,7 @@ response = client.models.generate_content(
 
 # Be specific about image regions
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=[
         image_file,
         "Focus on the items in the upper left corner. What are they?"
@@ -1310,7 +1388,7 @@ response = client.models.generate_content(
 ```python
 # Order matters for comparison
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash-preview-05-20",
     contents=[
         "Compare these UI designs:",
         types.Part(text="Design A:"), image1,
@@ -1331,7 +1409,7 @@ response = client.models.generate_content(
 ```python
 try:
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash-preview-05-20",
         contents=prompt
     )
 except Exception as e:
@@ -1377,6 +1455,5 @@ If migrating from older Gemini versions:
 - Client initialization changed: `genai.Client()` not `genai.configure()`
 - New `contents` parameter instead of `prompt`
 - Thinking mode enabled by default on 2.5 models
-- Search is now a tool, not a retrieval config
+- Search is now a `Tool` (`google_search`) for Gemini 2.0+ models, replacing the `google_search_retrieval` configuration used in 1.5 models
 - Many new features: thinking budgets, URL context, native audio
-
